@@ -270,9 +270,6 @@ def main(shp_dir_pred, shp_dir_true, city, epsg = None):
             if data.get('id') == check_id:
                 check_true.append(data)
 
-        #print("check_pred:" + str(len(check_pred)))
-        #print("check_true:" + str(len(check_true)))
-
         conf_mx = calculate_confusision_matrix(check_pred, check_true)
         result[check_id] = conf_mx
 

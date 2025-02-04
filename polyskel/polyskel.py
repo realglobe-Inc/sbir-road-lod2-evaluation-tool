@@ -313,7 +313,7 @@ class _SLAV:
 			self._lavs.remove(x.lav)
 			new_lavs = [_LAV.from_chain(v1, self)]
 		else:
-			print("v1, v2", v1, v2)
+			#print("v1, v2", v1, v2)
 			new_lavs = [_LAV.from_chain(v1, self), _LAV.from_chain(v2, self)]
 
 		for l in new_lavs:

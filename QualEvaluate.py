@@ -342,7 +342,7 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
         # 道路ID単位で誤りポリコン数による道路ランク判定
         # 点数によるポリコンランク判定
         road_judge_results = { 'road_id':[], 'road_rank':[], 'polys_rank':[], 'polys':[] }
-        if False:
+        if True:
             nr_processors = 8
             with Pool(nr_processors) as pool:
                 results = []
@@ -400,7 +400,6 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
                 road_judge_results['road_rank'].append(road_rank)
                 road_judge_results['polys_rank'].append(polys_rank)
 
-        print("for i, road_id in enumerate(road_judge_results['road_id'])")
         for i, road_id in enumerate(road_judge_results['road_id']):
             all_road_judge_results['file'].append(file)
             all_road_judge_results['road_id'].append(road_id)
