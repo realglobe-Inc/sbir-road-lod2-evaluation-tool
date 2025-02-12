@@ -11,10 +11,15 @@ from shapely.geometry.collection import GeometryCollection
 import polyskel
 from decimal import Decimal
 import decimal
+import gc
+import sys
 
 
 DIFF_DIST_REFERENCE = 1.75
 EVALUATION_REFERENCE = 0.5
+# 許容する最小エッジ長
+TOLERANCE = 0.000000001
+
 
 def truncate_coordinates(geom, precision=9):
     """
@@ -80,7 +85,7 @@ def read_road_pred(shp_path):
             intersec = sr.record["is_in_inte"]
 
             geom = Shape(sr.shape.__geo_interface__)
-            geom = truncate_coordinates(geom)
+            #geom = truncate_coordinates(geom)
 
             data.append({
                 "id" : id,
@@ -120,7 +125,7 @@ def read_road_true(shp_path, encoding="Shift-JIS"):
             if sr.shape.shapeType == 0:
                 continue  # NULL シェイプの場合は次のループへ
             geom = Shape(sr.shape.__geo_interface__)
-            geom = truncate_coordinates(geom)
+            #geom = truncate_coordinates(geom)
             
             if not geom.is_valid:
                 print("Geometry could not be fixed. Skipping.")
@@ -139,6 +144,10 @@ def read_road_true(shp_path, encoding="Shift-JIS"):
 
     return data
 
+def get_skeleton(poly):
+    skeleton = polyskel.skeletonize(poly, holes=[])
+    return skeleton
+
 def calc_diff(poly_pred, poly_true):
     """
     判定ポリゴン毎に差分ポリゴンを作成し、差分距離(m)を算出する
@@ -149,6 +158,12 @@ def calc_diff(poly_pred, poly_true):
     if poly_.area < 0.001:
         return 0
     
+    # MultiPolygon の場合は個別に simplify
+    if isinstance(poly_, MultiPolygon):
+        poly_ = [p.simplify(TOLERANCE, preserve_topology=True) for p in poly_.geoms]
+    elif isinstance(poly_, Polygon):
+        poly_ = poly_.simplify(TOLERANCE, preserve_topology=True)
+        
     if type(poly_) is MultiPolygon:
         for poly_item in poly_.geoms:
             polygons.append(list(poly_item.exterior.coords))
@@ -170,7 +185,8 @@ def calc_diff(poly_pred, poly_true):
         if len(poly) == 0:
             # 差分なし(完全一致)
             return 0
-        skeleton = polyskel.skeletonize(poly, holes=[])
+        
+        skeleton = get_skeleton(poly) #polyskel.skeletonize(poly, holes=[])
         ls_height = []
 
         #print("skeleton_count:", len(skeleton)) # 内接円の数
@@ -197,6 +213,9 @@ def calc_diff(poly_pred, poly_true):
                     tmp_height =  height*2
 
             ls_height.append(tmp_height)
+
+    del skeleton
+    gc.collect()
 
     # 各内接円から計算した距離のうち最大値を差分距離とする
     return max(ls_height)
@@ -309,6 +328,8 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
         shp_dir_true: 正解shp格納フォルダ ★shpファイル名前は予測結果と同じことを前提
         result_dir: 評価結果フォルダ
     """
+    pred_poly_count = 0
+    true_poly_count = 0
 
     if os.path.exists(result_dir):
         shutil.rmtree(result_dir)
@@ -355,11 +376,13 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
                     for data in data_pred:
                         if data.get('id') == check_id:
                             check_pred.append(data)
+                            pred_poly_count += 1
 
                     check_true = [] # 正解ポリゴン：[{"id":string, "class":string, "poly":polygon}]
                     for data in data_true:
                         if data.get('id') == check_id:
                             check_true.append(data)
+                            true_poly_count += 1
 
                     result = pool.apply_async(judge_polygon, args=(check_pred, check_true, check_id,))
                     results.append(result)
@@ -482,9 +505,13 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
         print(poly_rank_counts)
         f.write(f"{poly_rank_counts}\n")  # ファイルにも書き込み
 
+        print(f"予測ポリゴン数：{pred_poly_count}, 正解ポリゴン数：{true_poly_count}")
+        f.write(f"予測ポリゴン数：{pred_poly_count}, 正解ポリゴン数：{true_poly_count}\n")
+
     print(f"結果は {txt_file_path} に保存されました。")
 
 if __name__ == '__main__':
+
     #city = "hiroshima"
     #pred_name = "AAS2023ckpt_vectorized"
     #true_name = "true_v2.4"
