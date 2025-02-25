@@ -20,30 +20,6 @@ EVALUATION_REFERENCE = 0.5
 # 許容する最小エッジ長
 TOLERANCE = 0.000000001
 
-
-def truncate_coordinates(geom, precision=9):
-    """
-    Shapelyジオメトリオブジェクトの座標の小数点以下を指定桁数で切り捨て、
-    かつ不要な0を削除する
-    Args:
-        geom: Shapelyジオメトリオブジェクト
-        precision: 切り捨て桁数
-    Returns:
-        座標が切り捨てられ、かつ不要な0が削除されたShapelyジオメトリオブジェクト
-    """
-
-    def truncate_and_remove_zeros(x, precision):
-        d = Decimal(x).quantize(Decimal(f"1e-{precision}"), rounding=decimal.ROUND_DOWN) # 切り捨て
-        return d.normalize() # 0詰めを削除
-
-    if geom.geom_type == 'Polygon':
-        exterior = [(truncate_and_remove_zeros(x, precision), truncate_and_remove_zeros(y, precision)) for x, y in geom.exterior.coords]
-        interiors = [[(truncate_and_remove_zeros(x, precision), truncate_and_remove_zeros(y, precision)) for x, y in interior.coords] for interior in geom.interiors]
-        return Polygon(exterior, interiors)
-    else:
-        # 他のジオメトリタイプへの対応が必要な場合はここに処理を追加
-        return geom
-
 def read_road_pred(shp_path):
     """
     予測シェープファイル読み込み機能
@@ -85,7 +61,6 @@ def read_road_pred(shp_path):
             intersec = sr.record["is_in_inte"]
 
             geom = Shape(sr.shape.__geo_interface__)
-            #geom = truncate_coordinates(geom)
 
             data.append({
                 "id" : id,
@@ -125,7 +100,6 @@ def read_road_true(shp_path, encoding="Shift-JIS"):
             if sr.shape.shapeType == 0:
                 continue  # NULL シェイプの場合は次のループへ
             geom = Shape(sr.shape.__geo_interface__)
-            #geom = truncate_coordinates(geom)
             
             if not geom.is_valid:
                 print("Geometry could not be fixed. Skipping.")
@@ -225,18 +199,18 @@ def judge_points_count(points_count):
     ポリコン単位で工数削減率区分を判定
     """
     if points_count < 10:
-        return('A')
-    elif points_count < 20:
         return('B')
-    else:
+    elif points_count < 20:
         return('C')
+    else:
+        return('D')
 
 def judge_polygon(check_pred, check_true, cheak_id):
     """
     道路ID単位のポリゴン判定
     """
 
-    print("予測ポリゴン数：{} 正解ポリゴン数：{} id:{}:".format(len(check_pred), len(check_true), cheak_id))
+    #print("予測ポリゴン数：{} 正解ポリゴン数：{} id:{}:".format(len(check_pred), len(check_true), cheak_id))
     if len(check_pred)== 0:
         road_rank = 'C'
         polys_rank = ['C' for _ in check_true]
@@ -260,9 +234,10 @@ def judge_polygon(check_pred, check_true, cheak_id):
                 set_area.append(0)
 
         if max(set_area) == 0:
-            # 重り面積が0の場合は誤りポリゴンとする
+            # 重なり面積が0の場合は誤りポリゴンとする
             error_count += 1
-            polys_rank.append(judge_points_count(len(pred.get('poly').exterior.coords)))
+            #polys_rank.append(judge_points_count(len(pred.get('poly').exterior.coords)))
+            polys_rank.append("E")
             continue
 
         # 最も重なっているポリゴン同士の差分距離を計算
@@ -274,7 +249,7 @@ def judge_polygon(check_pred, check_true, cheak_id):
             error_count += 1
             polys_rank.append(judge_points_count(len(pred.get('poly').exterior.coords)))
         else:
-            polys_rank.append('-')
+            polys_rank.append('A')
 
     # 評価値　＝　誤りポリゴン数 / 道路IDの全ポリゴン数
     if error_count:
@@ -336,7 +311,7 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
     os.makedirs(result_dir)
     
     all_road_judge_results = { 'file':[], 'road_id':[], 'road_rank':[] }
-    all_poly_judge_results = { 'file':[], 'road_id':[], 'road_rank':[], 'poly_id':[], 'poly_rank':[] }
+    all_poly_judge_results = { 'file':[], 'road_id':[], 'road_rank':[], 'poly_id':[], 'poly_rank':[], 'poly_area': [] }
 
     shp_files_pred = [file for file in os.listdir(shp_dir_pred) if file[-4:]=='.shp']
     shp_files_true = [file for file in os.listdir(shp_dir_true) if file[-4:]=='.shp']
@@ -456,6 +431,7 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
             all_poly_judge_results['road_rank'].append(poly_judge_results['road_rank'][i])
             all_poly_judge_results['poly_id'].append(poly_judge_results['poly_id'][i])
             all_poly_judge_results['poly_rank'].append(poly_judge_results['poly_rank'][i])
+            all_poly_judge_results['poly_area'].append(poly_judge_results['poly'][i].area) 
 
         df = pd.DataFrame({
             'road_id' : poly_judge_results['road_id'],
@@ -494,7 +470,8 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
             'road_id': all_poly_judge_results['road_id'],
             'road_rank': all_poly_judge_results['road_rank'],
             'poly_id': all_poly_judge_results['poly_id'],
-            'poly_rank': all_poly_judge_results['poly_rank']
+            'poly_rank': all_poly_judge_results['poly_rank'],
+            'poly_area': all_poly_judge_results['poly_area']  # 面積を追加
         })
         df.to_csv(os.path.join(result_dir, "all_eval2.csv"), index=False)
 
@@ -505,6 +482,18 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
         print(poly_rank_counts)
         f.write(f"{poly_rank_counts}\n")  # ファイルにも書き込み
 
+        # ポリゴンランクごとの面積を計算
+        print(f"ポリゴンランクごとの面積")
+        f.write("ポリゴンランクごとの面積\n")  # ファイルにも書き込み
+
+        # groupby を使って poly_rank ごとに poly_area を合計
+        poly_rank_areas = df.groupby('poly_rank')['poly_area'].sum()
+
+        for rank, area in poly_rank_areas.items():
+            print(f"ランク{rank}: {area} m^2")
+            f.write(f"ランク{rank}: {area} m^2\n")  # ファイルにも書き込み
+
+
         print(f"予測ポリゴン数：{pred_poly_count}, 正解ポリゴン数：{true_poly_count}")
         f.write(f"予測ポリゴン数：{pred_poly_count}, 正解ポリゴン数：{true_poly_count}\n")
 
@@ -513,28 +502,29 @@ def main(shp_dir_pred, shp_dir_true, result_dir, city):
 if __name__ == '__main__':
 
     #city = "hiroshima"
-    #pred_name = "AAS2023ckpt_vectorized"
+    #pred_name = "pred_512_8cm_5city_erank_replace"
     #true_name = "true_v2.4"
     
     #city = "gifu"
-    #pred_name = "pred_aas2023ckpt"
+    #pred_name = "pred_512_8cm_5city_erank_replace"
     #true_name = "true"
 
-    #city = "sendai"
-    #pred_name = "pred_5city"
-    #true_name = "sendai_shp_lod2_add_id_intersection"
+    city = "sendai"
+    pred_name = "pred_5city"
+    true_name = "sendai_shp_lod2_add_id_intersection_6678"
     
     #city = "mitaka"
-    #pred_name = "pred_5city"
-    #true_name = "mitaka_shp_lod2_add_id_intersection"
+    #pred_name = "pred_512_8cm_5city"
+    #true_name = "mitaka_shp_lod2_add_id_intersection_6677"
     
-    city = "kaga"
-    pred_name = "pred_512_8cm_5city"
-    true_name = "kaga_shp_lod2_add_intersection"
+    #city = "kaga"
+    #pred_name = "pred_aas2023_erank_replace"
+    #true_name = "kaga_shp_lod2_add_intersection"
 
-    shp_dir_pred = os.path.join(city, pred_name)
-    shp_dir_true = os.path.join(city, true_name)
-    result_dir = os.path.join(city, "qual_eval_result", pred_name)
+    data_path = os.path.join("data", city)
+    shp_dir_pred = os.path.join(data_path, pred_name)
+    shp_dir_true = os.path.join(data_path, true_name)
+    result_dir = os.path.join(data_path, "qual_eval_result", pred_name)
     
     main(shp_dir_pred, shp_dir_true, result_dir, city)
     print("Done")
